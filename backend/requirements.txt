@@ -1,0 +1,37 @@
+# FastAPI & server
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# Supabase
+supabase>=2.3.0
+
+# OpenAI (LLM + TTS only — NOT embeddings)
+openai>=1.30.0
+
+# LangGraph & LangChain
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+
+# Open-source embeddings (sentence-transformers)
+sentence-transformers>=2.7.0
+
+# Token counting
+tiktoken>=0.7.0
+
+# Retry / resilience
+tenacity>=8.2.0
+
+# Config management
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+
+# Data processing (ingestion)
+pandas>=2.1.0
+numpy>=1.26.0
+tqdm>=4.66.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
