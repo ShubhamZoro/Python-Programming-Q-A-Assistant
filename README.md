@@ -27,7 +27,6 @@ LangGraph Agent
   └── not_python_node → static  (graceful refusal)
       │
       ├── Supabase  (chat_sessions + chat_messages, RLS-enforced)
-      └── OpenAI TTS  (tts-1, alloy — optional voice responses)
 ```
 
 ---
@@ -58,7 +57,6 @@ LangGraph Agent
 | Vector Database | Pinecone (serverless, cosine, 384-dim) |
 | Auth & DB | Supabase (Auth + PostgreSQL + RLS) |
 | Chat History | Supabase `chat_sessions` + `chat_messages` |
-| TTS | OpenAI TTS (tts-1, alloy, MP3) |
 | Frontend | React 19 + Vite 8 |
 | Deployment | Render (backend) + Vercel (frontend) |
 
@@ -78,8 +76,6 @@ LangGraph Agent
 │   │   ├── retriever.py         # Pinecone query + async wrapper
 │   │   ├── ingest.py            # Supabase ingestion (legacy)
 │   │   └── pinecone_ingest.py   # Async Pinecone ingestion pipeline
-│   ├── tts/
-│   │   └── synthesizer.py       # OpenAI TTS wrapper (base64 MP3)
 │   ├── models/
 │   │   └── schemas.py           # Pydantic request/response schemas
 │   ├── main.py                  # FastAPI app + all endpoints
@@ -230,7 +226,7 @@ Pinecone index
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health` | — | Version + model info |
-| `POST` | `/ask` | Bearer JWT | Full Q&A with optional TTS |
+| `POST` | `/ask` | Bearer JWT |
 | `GET` | `/sources` | Bearer JWT | Retrieve matching docs without answering |
 | `POST` | `/auth/signup` | — | Create account |
 | `POST` | `/auth/login` | — | Sign in, returns JWT |
@@ -344,7 +340,6 @@ Forwarding the user's JWT to PostgREST enables native RLS enforcement without ma
 
 **Estimated cost at 100 req/min:**
 - GPT-4o: ~$0.30/1K tokens × avg 800 tokens/req × 6K req/hr ≈ **$1.44/hr**
-- OpenAI TTS: ~$0.015/1K chars × 500 chars × 20% voice rate × 6K req/hr ≈ **$0.09/hr**
 - Supabase free tier: sufficient up to ~200K req/day
 - Render: ~$14/mo for two instances
 
