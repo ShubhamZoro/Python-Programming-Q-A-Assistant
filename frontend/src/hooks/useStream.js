@@ -3,14 +3,20 @@ import { api } from "../lib/api";
 
 /**
  * useStream — SSE streaming hook for real-time token streaming.
+ *
+ * @param {string|null} jwt — user's Supabase access_token (forwarded in header)
  */
-export function useStream() {
+export function useStream(jwt = null) {
   const [streamContent, setStreamContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState(null);
   const abortRef = useRef(null);
+  const jwtRef = useRef(jwt);
 
-  const startStream = useCallback(async (question, onToken, onComplete, onError) => {
+  // Keep jwtRef current without causing re-renders
+  jwtRef.current = jwt;
+
+  const startStream = useCallback(async (question, sessionId, onToken, onComplete, onError) => {
     setStreamContent("");
     setStreamError(null);
     setIsStreaming(true);
@@ -22,11 +28,16 @@ export function useStream() {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const currentJwt = jwtRef.current;
+
     try {
       const response = await fetch(api.getStreamUrl(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(currentJwt ? { Authorization: `Bearer ${currentJwt}` } : {}),
+        },
+        body: JSON.stringify({ question, session_id: sessionId || null }),
         signal: controller.signal,
       });
 

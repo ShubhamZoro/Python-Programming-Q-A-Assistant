@@ -1,43 +1,40 @@
 """
-Supabase pgvector retriever — TRULY async.
+Pinecone vector database retriever.
 
-Uses supabase AsyncClient so the event loop is never blocked.
+Replaces Supabase pgvector for semantic search.
 Embeddings are 384-dim (all-MiniLM-L6-v2).
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import List
 
 from dotenv import load_dotenv
-from supabase import AsyncClient, acreate_client
+from pinecone import Pinecone
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "python-qa")
 
-# Async singleton — created once and reused
-_async_client: AsyncClient | None = None
+# Singleton Pinecone index — created once and reused
+_index = None
 
 
-async def get_async_client() -> AsyncClient:
-    """
-    Return (or lazily create) the async Supabase client.
-    Must be called inside an async context.
-    """
-    global _async_client
-    if _async_client is None:
-        if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
-        _async_client = await acreate_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-        logger.info("Async Supabase client initialized")
-    return _async_client
+def _get_index():
+    """Lazily initialize and return the Pinecone index."""
+    global _index
+    if _index is None:
+        if not PINECONE_API_KEY:
+            raise RuntimeError("PINECONE_API_KEY must be set in .env")
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        _index = pc.Index(PINECONE_INDEX_NAME)
+        logger.info(f"Pinecone index '{PINECONE_INDEX_NAME}' connected.")
+    return _index
 
 
 async def retrieve_similar(
@@ -46,28 +43,37 @@ async def retrieve_similar(
     match_threshold: float = 0.3,
 ) -> List[dict]:
     """
-    Truly async query of Supabase match_documents RPC.
-    Uses cosine similarity — returns list of dicts with keys:
-      id, row_number, content, similarity
-    Never blocks the FastAPI event loop.
+    Query Pinecone for the top_k most similar vectors.
+    Returns list of dicts with keys: id, row_number, content, similarity.
     """
-    client = await get_async_client()
+    import asyncio, functools
 
-    try:
-        response = await (
-            client.rpc(
-                "match_documents",
-                {
-                    "query_embedding": query_embedding,
-                    "match_threshold": match_threshold,
-                    "match_count": top_k,
-                },
-            )
-            .execute()
+    def _query():
+        index = _get_index()
+        results = index.query(
+            vector=query_embedding,
+            top_k=top_k,
+            include_metadata=True,
         )
-        return response.data or []
+        docs = []
+        for match in results.get("matches", []):
+            score = match.get("score", 0.0)
+            if score < match_threshold:
+                continue
+            meta = match.get("metadata", {})
+            docs.append({
+                "id": match.get("id"),
+                "row_number": meta.get("row_number"),
+                "content": meta.get("content", ""),
+                "similarity": score,
+            })
+        return docs
+
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, _query)
     except Exception as e:
-        logger.error(f"Retrieval error: {e}")
+        logger.error(f"Pinecone retrieval error: {e}")
         return []
 
 
@@ -77,3 +83,15 @@ async def get_sources_for_question(
 ) -> List[dict]:
     """Used by GET /sources endpoint — same as retrieve_similar."""
     return await retrieve_similar(query_embedding, top_k=limit)
+
+
+# ── Kept for startup health check ─────────────────────────────────────────────
+async def get_async_client():
+    """
+    Compatibility shim — main.py calls this on startup.
+    Pinecone index is sync; we just verify connectivity here.
+    """
+    import asyncio, functools
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _get_index)
+    logger.info("Pinecone index ready.")

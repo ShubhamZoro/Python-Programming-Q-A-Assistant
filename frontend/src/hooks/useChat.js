@@ -1,29 +1,80 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { api } from "../lib/api";
 
 /**
- * useChat — manages chat history and message sending.
+ * useChat — manages messages for a specific session.
+ * Conversation memory (context) is handled entirely by the backend:
+ *   on every /ask call, the backend fetches the last MEMORY_WINDOW messages
+ *   and injects them into the LLM prompt so the model has full context.
+ *
+ * @param {string|null} sessionId        — current session UUID (null = no session yet)
+ * @param {string|null} jwt              — user's Supabase access_token
+ * @param {function}    onSessionCreated — called with (id, title) after auto-create
  */
-export function useChat() {
+export function useChat({ sessionId, jwt, onSessionCreated } = {}) {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const addMessage = useCallback((message) => {
-    setMessages((prev) => [...prev, message]);
-  }, []);
+  // Refs so callbacks always see the latest values without stale closures
+  const sessionIdRef = useRef(sessionId);
+  const jwtRef = useRef(jwt);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { jwtRef.current = jwt; }, [jwt]);
 
-  const updateLastAssistantMessage = useCallback((updater) => {
-    setMessages((prev) => {
-      const copy = [...prev];
-      const lastIdx = copy.length - 1;
-      if (lastIdx >= 0 && copy[lastIdx].role === "assistant") {
-        copy[lastIdx] = { ...copy[lastIdx], ...updater(copy[lastIdx]) };
+  // Track the previous sessionId so we only reset messages on real session changes
+  const prevSessionIdRef = useRef(sessionId);
+
+  // ── Reset messages when session changes (not when jwt refreshes) ────────────
+  useEffect(() => {
+    // Only clear + reload when the sessionId itself changes, not on jwt refresh.
+    // This prevents the empty-screen flash that occurs when Supabase silently
+    // rotates the access token (autoRefreshToken) mid-conversation.
+    const prevSid = prevSessionIdRef.current;
+    prevSessionIdRef.current = sessionId;
+
+    if (sessionId === prevSid) {
+      // jwt changed but session is the same — do nothing, jwtRef is already updated
+      return;
+    }
+
+    if (!sessionId) {
+      setMessages([]);
+      return;
+    }
+
+    // sessionId changed to a real value — load its history
+    let cancelled = false;
+    (async () => {
+      const currentJwt = jwtRef.current;
+      if (!currentJwt) return;
+      try {
+        const msgs = await api.getMessages(sessionId, currentJwt);
+        if (!cancelled) {
+          setMessages((prev) => {
+            // If we have an optimistic/loading message right now (e.g. we just created this session),
+            // don't overwrite it with the (empty) DB history!
+            if (prev.some((m) => m.loading)) return prev;
+
+            return msgs.map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              sources: m.sources || [],
+              grounded: m.grounded,
+              loading: false,
+            }));
+          });
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message);
       }
-      return copy;
-    });
-  }, []);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, jwt]);
 
+  // ── Send a message ──────────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (question, voice = false) => {
       if (!question.trim() || isLoading) return;
@@ -32,59 +83,94 @@ export function useChat() {
       setIsLoading(true);
 
       // Add user message
-      addMessage({ id: Date.now(), role: "user", content: question });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: question,
+        },
+      ]);
 
-      // Add placeholder assistant message
-      const assistantId = Date.now() + 1;
-      addMessage({
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        sources: [],
-        grounded: false,
-        audio_base64: null,
-        loading: true,
-      });
+      // Assistant placeholder
+      const placeholderId = `asst-${Date.now()}`;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: placeholderId,
+          role: "assistant",
+          content: "",
+          sources: [],
+          grounded: false,
+          loading: true,
+        },
+      ]);
 
       try {
-        const data = await api.ask(question, voice);
+        const currentJwt = jwtRef.current;
+        let sid = sessionIdRef.current;
 
-        // Replace placeholder with real response
+        // Auto-create session
+        if (!sid) {
+          const created = await api.createSession(
+            "New Chat",
+            currentJwt
+          );
+
+          sid = created.session_id;
+          sessionIdRef.current = sid;
+
+          onSessionCreated?.(
+            sid,
+            created.title
+          );
+        }
+
+        // Call /ask endpoint
+        const result = await api.ask(
+          question,
+          sid,
+          currentJwt
+        );
+
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === placeholderId
               ? {
-                  ...m,
-                  content: data.answer,
-                  sources: data.sources || [],
-                  grounded: data.grounded,
-                  audio_base64: data.audio_base64 || null,
-                  loading: false,
-                }
+                ...m,
+                content: result.answer,
+                sources: result.sources || [],
+                grounded: result.grounded || false,
+                loading: false,
+              }
               : m
           )
         );
       } catch (err) {
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === placeholderId
               ? {
-                  ...m,
-                  content: "",
-                  error: err.message || "Failed to get answer. Please try again.",
-                  loading: false,
-                }
+                ...m,
+                content: "",
+                error:
+                  err.message ||
+                  "Failed to get answer.",
+                loading: false,
+              }
               : m
           )
         );
+
         setError(err.message);
       } finally {
         setIsLoading(false);
       }
     },
-    [isLoading, addMessage]
+    [isLoading, onSessionCreated]
   );
-
+  // ── Helpers ─────────────────────────────────────────────────────────────────
   const clearHistory = useCallback(() => {
     setMessages([]);
     setError(null);
@@ -93,7 +179,7 @@ export function useChat() {
   const retryLast = useCallback(() => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (lastUser) {
-      setMessages((prev) => prev.slice(0, -2)); // remove last user + assistant
+      setMessages((prev) => prev.slice(0, -1)); // Remove the failed assistant response (which is the last one)
       sendMessage(lastUser.content);
     }
   }, [messages, sendMessage]);

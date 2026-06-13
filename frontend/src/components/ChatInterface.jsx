@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import MessageBubble from "./MessageBubble";
 import { useChat } from "../hooks/useChat";
 import { useSpeech } from "../hooks/useSpeech";
@@ -12,12 +12,29 @@ const SUGGESTIONS = [
 ];
 
 /**
- * ChatInterface — Main conversational Q&A UI with STT mic input.
+ * ChatInterface — Main conversational Q&A UI.
+ *
+ * Props:
+ *   sessionId        — current session UUID (null = new session)
+ *   jwt              — user's Supabase access_token
+ *   onSessionCreated — called when a new session is auto-created
+ *
+ * Memory: the last MEMORY_WINDOW messages from the session are automatically
+ * injected into every LLM call by the backend (get_conversation_memory).
+ * No manual summarization needed — the model sees full conversation context.
  */
-export default function ChatInterface() {
-  const { messages, isLoading, sendMessage, clearHistory } = useChat();
+export default function ChatInterface({ sessionId, jwt, onSessionCreated }) {
+  const {
+    messages,
+    isLoading,
+    error,
+    sendMessage,
+    clearHistory,
+    retryLast,
+  } = useChat({ sessionId, jwt, onSessionCreated });
+
   const [input, setInput] = useState("");
-  const [interimText, setInterimText] = useState(""); // live interim transcript
+  const [interimText, setInterimText] = useState("");
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -40,6 +57,12 @@ export default function ChatInterface() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Reset input when session changes
+  useEffect(() => {
+    setInput("");
+    setInterimText("");
+  }, [sessionId]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -65,13 +88,13 @@ export default function ChatInterface() {
           <div className="empty-state">
             <div className="empty-icon">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
-                <path d="M8 12h.01M12 12h.01M16 12h.01"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+                <path d="M8 12h.01M12 12h.01M16 12h.01" />
               </svg>
             </div>
             <h2 className="empty-title">Python Q&amp;A Assistant</h2>
             <p className="empty-subtitle">
-              Powered by Stack Overflow + GPT-4o. Ask by typing or click the mic to speak.
+              Powered by Stack Overflow + GPT-4o. Ask anything — I remember the full conversation.
             </p>
             <div className="suggestions">
               {SUGGESTIONS.map((s, i) => (
@@ -97,7 +120,7 @@ export default function ChatInterface() {
       {speechError && (
         <div className="speech-error">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
           </svg>
           {speechError}
         </div>
@@ -106,7 +129,6 @@ export default function ChatInterface() {
       {/* Input area */}
       <div className="input-area">
         <div className="input-controls">
-
           {/* Mic button (STT) */}
           {isSupported && (
             <button
@@ -117,17 +139,15 @@ export default function ChatInterface() {
               type="button"
             >
               {isListening ? (
-                /* Animated mic-off / stop icon */
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="9" y="9" width="6" height="6" rx="1"/>
-                  <path d="M12 1a3 3 0 0 0-3 3v5h6V4a3 3 0 0 0-3-3z" opacity="0.4"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z" opacity="0.4"/>
+                  <rect x="9" y="9" width="6" height="6" rx="1" />
+                  <path d="M12 1a3 3 0 0 0-3 3v5h6V4a3 3 0 0 0-3-3z" opacity="0.4" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z" opacity="0.4" />
                 </svg>
               ) : (
-                /* Mic icon */
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z"/>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z" />
                 </svg>
               )}
               {isListening && <span className="mic-pulse" />}
@@ -170,7 +190,7 @@ export default function ChatInterface() {
                 <span className="spinner" />
               ) : (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
                 </svg>
               )}
             </button>
@@ -178,20 +198,22 @@ export default function ChatInterface() {
 
           {/* Clear history */}
           {messages.length > 0 && (
-            <button
-              className="clear-btn"
-              onClick={clearHistory}
-              title="Clear chat"
-              aria-label="Clear chat history"
-              type="button"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6l-1 14H6L5 6"/>
-                <path d="M10 11v6M14 11v6"/>
-                <path d="M9 6V4h6v2"/>
-              </svg>
-            </button>
+            <div className="chat-actions">
+              <button
+                className="clear-btn"
+                onClick={clearHistory}
+                title="Clear chat view"
+                aria-label="Clear chat view"
+                type="button"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </div>
           )}
         </div>
 
