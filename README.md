@@ -2,6 +2,7 @@
 
 > A RAG-powered Python programming Q&A assistant using Stack Overflow data, a LangGraph agentic pipeline, GPT-4o, and open-source embeddings — with a full-stack React frontend, Supabase auth, and persistent chat history.
 
+Url: https://python-programming-q-a-assistant.vercel.app/
 ---
 
 ## Architecture
@@ -10,10 +11,10 @@
 User (Browser)
       │
       ▼
-React Frontend  (Vite + Vercel)
+React Frontend  (Vite)
       │  POST /ask
       ▼
-FastAPI Backend  (Render)
+FastAPI Backend
       │
       ▼
 LangGraph Agent
@@ -26,7 +27,7 @@ LangGraph Agent
   ├── fallback_node   → GPT-4o  (model-knowledge + disclaimer)
   └── not_python_node → static  (graceful refusal)
       │
-      ├── Supabase  (chat_sessions + chat_messages, RLS-enforced)
+      └── Supabase  (chat_sessions + chat_messages, RLS-enforced)
 ```
 
 ---
@@ -34,15 +35,15 @@ LangGraph Agent
 ## Features
 
 - **7-node LangGraph agent** — classify → rewrite → retrieve → grade → generate, with memory and fallback branches
-- **Query rewriting** — vague follow-ups ("how does it work?") are resolved into self-contained queries before retrieval
+- **Query rewriting** — vague follow-ups are resolved into self-contained queries before retrieval
 - **Conversation memory** — last N messages injected into every LLM call for multi-turn coherence
-- **Relevance grading** — each retrieved doc is scored by GPT-4o before generation, preventing hallucination on off-topic results
-- **Graceful non-Python refusal** — classifier gates the pipeline; off-topic queries return a polite message without hitting retrieval
+- **Relevance grading** — each retrieved doc is scored by GPT-4o before generation
+- **Graceful non-Python refusal** — classifier gates the pipeline; off-topic queries return a polite message
 - **Per-session chat history** — stored in Supabase with row-level security; messages persist across page reloads
 - **AI session summaries** — GPT-4o can summarize any conversation and store it on the session record
 - **Full auth flow** — email/password + Google OAuth via Supabase Auth; JWT forwarded to backend on every request
 - **Voice input** — browser Web Speech API for STT; result appended to the chat input
-- **Pinecone vector store** — 50K+ Stack Overflow Q&A pairs ingested with async pipeline, resumable via checkpoint
+- **Pinecone vector store** — Stack Overflow Q&A pairs ingested with async pipeline, resumable via checkpoint
 
 ---
 
@@ -57,7 +58,7 @@ LangGraph Agent
 | Vector Database | Pinecone (serverless, cosine, 384-dim) |
 | Auth & DB | Supabase (Auth + PostgreSQL + RLS) |
 | Chat History | Supabase `chat_sessions` + `chat_messages` |
-| Frontend | React 19 + Vite 8 |
+| Frontend | React 19 + Vite |
 | Deployment | Render (backend) + Vercel (frontend) |
 
 ---
@@ -74,7 +75,6 @@ LangGraph Agent
 │   ├── rag/
 │   │   ├── embeddings.py        # FastEmbed wrapper (BAAI/bge-small)
 │   │   ├── retriever.py         # Pinecone query + async wrapper
-│   │   ├── ingest.py            # Supabase ingestion (legacy)
 │   │   └── pinecone_ingest.py   # Async Pinecone ingestion pipeline
 │   ├── models/
 │   │   └── schemas.py           # Pydantic request/response schemas
@@ -85,7 +85,7 @@ LangGraph Agent
 │   └── requirements.txt
 └── frontend/
     ├── src/
-    │   ├── components/          # ChatInterface, MessageBubble, Sidebar, AuthPage, …
+    │   ├── components/          # ChatInterface, MessageBubble, Sidebar, AuthPage, SourceCards, HealthBadge
     │   ├── hooks/               # useAuth, useChat, useSessions, useSpeech, useStream
     │   └── lib/                 # api.js, supabaseClient.js
     ├── index.html
@@ -123,7 +123,7 @@ Run the Supabase schema (one-time — paste into the Supabase SQL Editor):
 # Open supabase_setup.sql and run all four sections in order
 ```
 
-Ingest Stack Overflow data into Pinecone (one-time, ~30–60 min for 50K records):
+Ingest Stack Overflow data into Pinecone (one-time):
 
 ```bash
 python rag/pinecone_ingest.py
@@ -182,13 +182,9 @@ START → classify_node
 | `grounded` | `bool` | Whether answer is backed by retrieved docs |
 | `conversation_memory` | `list` | LangChain `HumanMessage` / `AIMessage` objects |
 
-**Timing:** every node is wrapped in an async `timer()` context manager that logs elapsed ms at INFO level, making it easy to identify latency bottlenecks.
-
 ---
 
 ## RAG Pipeline
-
-**Data source:** Stack Overflow Python Q&A pairs preprocessed from the Kaggle dataset (`question_answer.json`, 262K records total; 50K ingested by default).
 
 **Ingestion pipeline** (`rag/pinecone_ingest.py`):
 
@@ -219,18 +215,14 @@ Pinecone index
 
 ## API Endpoints
 
-### WebSocket — none (HTTP only)
-
-### REST
-
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health` | — | Version + model info |
-| `POST` | `/ask` | Bearer JWT |
+| `POST` | `/ask` | Bearer JWT | Ask a Python question |
 | `GET` | `/sources` | Bearer JWT | Retrieve matching docs without answering |
 | `POST` | `/auth/signup` | — | Create account |
 | `POST` | `/auth/login` | — | Sign in, returns JWT |
-| `POST` | `/auth/logout` | Bearer JWT | Sign out (stateless) |
+| `POST` | `/auth/logout` | Bearer JWT | Sign out |
 | `GET` | `/auth/me` | Bearer JWT | Current user info |
 | `GET` | `/sessions` | Bearer JWT | List user's sessions |
 | `POST` | `/sessions` | Bearer JWT | Create session |
@@ -286,68 +278,38 @@ PINECONE_API_KEY, PINECONE_INDEX_NAME, ENVIRONMENT=production, ALLOWED_ORIGIN
 VITE_API_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 ```
 
-### Live URLs
+---
 
-| Service | URL |
+## Environment Variables
+
+### Backend (`.env`)
+
+| Variable | Description |
 |---|---|
-| Frontend | *(add after deployment)* |
-| Backend API | *(add after deployment)* |
-| API Docs | `{backend-url}/docs` |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key |
+| `PINECONE_API_KEY` | Pinecone API key |
+| `PINECONE_INDEX_NAME` | Pinecone index name (default: `python-qa`) |
+| `PINECONE_ENVIRONMENT` | Pinecone region (default: `us-east-1`) |
+| `ENVIRONMENT` | `development` or `production` |
+| `ALLOWED_ORIGIN` | CORS allowed origin |
+| `EMBEDDING_MODEL` | Embedding model name |
+| `EMBEDDING_DIM` | Embedding dimensions (384) |
+| `MEMORY_WINDOW` | Number of past messages to inject (default: 10) |
 
----
+### Frontend (`.env`)
 
-## Running Tests
-
-```bash
-cd backend
-pytest tests/ -v
-```
-
-8 tests covering health check, valid Q&A, voice response, non-Python refusal, empty input validation, SSE streaming, source retrieval, and structured response shape.
-
----
-
-## Design Decisions
-
-**Why LangGraph over bare function calling?**
-Explicit `StateGraph` gives named nodes, conditional edges, and an append-only `conversation_memory` field — all of which make multi-turn context and the classify→rewrite→retrieve→grade→generate pipeline easy to inspect, test, and extend.
-
-**Why open-source embeddings (BAAI/bge-small-en-v1.5)?**
-Embedding 50K+ records with OpenAI would incur non-trivial cost and rate-limit management. FastEmbed runs entirely locally at ~50ms per batch with zero API calls. The same model runs at query time, so the vector space is consistent.
-
-**Why Pinecone over pgvector?**
-Pinecone's async client and serverless index handle high-concurrency vector queries without adding infrastructure. The legacy pgvector tables remain in `supabase_setup.sql` for reference but are no longer queried.
-
-**Why query rewriting?**
-Follow-up questions like "can you show me an example?" have no useful embedding on their own. The `rewrite_node` resolves references against the last few turns before retrieval, dramatically improving precision on conversational queries.
-
-**Why per-user JWT scoping instead of separate anon/service clients?**
-Forwarding the user's JWT to PostgREST enables native RLS enforcement without maintaining a separate connection pool or implementing ownership checks in application code.
-
----
-
-## Scaling Plan for 100+ Concurrent Users
-
-| Layer | Strategy |
+| Variable | Description |
 |---|---|
-| FastAPI | `gunicorn` with 4–8 `uvicorn` workers |
-| Embeddings | Loaded once per worker; CPU work in `asyncio.run_in_executor` |
-| Pinecone | Serverless index handles ~1000 QPS; no changes needed at this scale |
-| Supabase | Built-in PgBouncer connection pooling |
-| Caching | Redis (TTL 1h) for repeated questions — skip LLM on cache hit |
-| Horizontal scaling | Multiple Render instances behind load balancer |
-| OpenAI rate limits | Exponential backoff via `tenacity`; batch embedding at ingestion |
-
-**Estimated cost at 100 req/min:**
-- GPT-4o: ~$0.30/1K tokens × avg 800 tokens/req × 6K req/hr ≈ **$1.44/hr**
-- Supabase free tier: sufficient up to ~200K req/day
-- Render: ~$14/mo for two instances
+| `VITE_API_URL` | Backend API base URL |
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon key |
 
 ---
 
 ## Known Limitations
 
-- **In-memory Pinecone client** — the sync client is wrapped in an executor; a production setup should use `AsyncPinecone` throughout the request path
-- **Grade node latency** — grading 5 docs with individual GPT-4o calls adds ~2s; batching or a smaller model (e.g. GPT-4o-mini) would reduce this significantly
+- **Grade node latency** — grading 5 docs with individual GPT-4o calls adds ~2s; batching or a smaller model would reduce this
 - **SSE streaming endpoint** — `POST /ask/stream` is implemented but commented out in `main.py`; it works locally but was disabled pending session persistence integration
-- **Google OAuth** — requires the real Supabase anon key with PKCE flow enabled; the current frontend uses implicit flow
+- **Google OAuth** — requires a valid Supabase anon key with PKCE flow enabled; current setup uses implicit flow
