@@ -1,7 +1,11 @@
 """
-Open-source embedding using sentence-transformers.
-Model: all-MiniLM-L6-v2 (384-dim, fast, good quality for semantic search)
-No API key required — runs fully locally.
+Open-source embedding using FastEmbed (NO torch dependency).
+
+Model: BAAI/bge-small-en-v1.5
+- 384 dimensions
+- Fast
+- Production-ready
+- Fully local (no API key)
 """
 
 from __future__ import annotations
@@ -11,45 +15,71 @@ import functools
 import logging
 from typing import List
 
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
 
-# Singleton model — loaded once on first import
-_model: SentenceTransformer | None = None
-MODEL_NAME = "all-MiniLM-L6-v2"
+# ── Singleton model ─────────────────────────────────────────────
+_model = None
+MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
 
-def _get_model() -> SentenceTransformer:
-    """Load model lazily (once) to avoid cold-start on every call."""
+def _get_model():
+    """
+    Load FastEmbed model once (lazy init).
+    Prevents repeated loading overhead.
+    """
     global _model
     if _model is None:
         logger.info(f"Loading embedding model: {MODEL_NAME}")
-        _model = SentenceTransformer(MODEL_NAME)
-        logger.info("Embedding model loaded.")
+        _model = TextEmbedding(model_name=MODEL_NAME)
+        logger.info("FastEmbed model loaded successfully.")
     return _model
 
 
+# ── Core embedding function ─────────────────────────────────────
 def embed_texts_sync(texts: List[str]) -> List[List[float]]:
-    """Synchronous batch embedding — returns list of float vectors."""
+    """
+    Synchronous batch embedding.
+
+    Input:
+        texts: list of strings
+
+    Output:
+        list of embedding vectors (float lists)
+    """
     model = _get_model()
-    embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-    return embeddings.tolist()
+
+    # FastEmbed returns generator → convert to list
+    embeddings = list(model.embed(texts))
+
+    # Convert numpy arrays → Python lists for Pinecone compatibility
+    return [emb.tolist() for emb in embeddings]
 
 
+# ── Async wrapper (used by your ingestion pipeline) ─────────────
 async def embed_texts(texts: List[str]) -> List[List[float]]:
-    """Async wrapper — runs CPU-bound encoding in a thread pool."""
+    """
+    Async wrapper for CPU-bound embedding.
+    Runs in thread pool executor.
+    """
     loop = asyncio.get_event_loop()
     fn = functools.partial(embed_texts_sync, texts)
     return await loop.run_in_executor(None, fn)
 
 
+# ── Single query embedding (async) ───────────────────────────────
 async def embed_query(text: str) -> List[float]:
-    """Embed a single query string asynchronously."""
+    """
+    Embed a single query string (async).
+    """
     results = await embed_texts([text])
     return results[0]
 
 
+# ── Single query embedding (sync) ────────────────────────────────
 def embed_query_sync(text: str) -> List[float]:
-    """Synchronous single query embedding (for ingestion script)."""
+    """
+    Sync embedding for ingestion or simple calls.
+    """
     return embed_texts_sync([text])[0]

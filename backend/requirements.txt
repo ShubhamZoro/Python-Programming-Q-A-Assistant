@@ -18,7 +18,7 @@ langchain-core>=0.3.0
 langchain-openai>=0.2.0
 
 # Open-source embeddings (sentence-transformers)
-sentence-transformers>=2.7.0
+fastembed>=0.2.0
 
 # Token counting
 tiktoken>=0.7.0

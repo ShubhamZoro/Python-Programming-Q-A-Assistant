@@ -65,7 +65,7 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
 VERSION = "3.0.0"
 LLM_MODEL = "gpt-4o"
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
